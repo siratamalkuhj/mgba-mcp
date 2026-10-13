@@ -1956,6 +1956,8 @@ bool MCPServerListen(struct MCPServer* server, int port, const struct Address* b
 	/* A client hanging up mid-response must not kill the emulator. */
 	signal(SIGPIPE, SIG_IGN);
 #endif
+	/* Not every frontend starts Winsock (the headless one doesn't); it is refcounted, so this is safe. */
+	SocketSubsystemInit();
 	struct Address localhost = { .version = IPV4, .ipv4 = 0x7F000001 };
 	if (!bindAddress) {
 		bindAddress = &localhost;
