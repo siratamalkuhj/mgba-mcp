@@ -114,6 +114,13 @@ int main(int argc, char * argv[]) {
 		goto argsExit;
 	}
 	core->init(core);
+
+	// Give the core somewhere to render so screenshots (e.g. over MCP) work.
+	unsigned videoWidth, videoHeight;
+	core->baseVideoSize(core, &videoWidth, &videoHeight);
+	mColor* videoBuffer = calloc(videoWidth * videoHeight, sizeof(*videoBuffer));
+	core->setVideoBuffer(core, videoBuffer, videoWidth);
+
 	mCoreInitConfig(core, "headless");
 	mArgumentsApply(&args, NULL, 0, &core->config);
 
@@ -248,6 +255,7 @@ loadError:
 	mStandardLoggerDeinit(&_logger);
 	mCoreConfigDeinit(&core->config);
 	core->deinit(core);
+	free(videoBuffer);
 	if (_returnCodeRegister) {
 		free(_returnCodeRegister);
 	}

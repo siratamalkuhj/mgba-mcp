@@ -61,6 +61,10 @@
 #cmakedefine ENABLE_GDB_STUB
 #endif
 
+#ifndef ENABLE_MCP_SERVER
+#cmakedefine ENABLE_MCP_SERVER
+#endif
+
 #ifndef ENABLE_SCRIPTING
 #cmakedefine ENABLE_SCRIPTING
 #endif

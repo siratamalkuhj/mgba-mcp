@@ -15,6 +15,9 @@
 #ifdef ENABLE_GDB_STUB
 #include <mgba/internal/debugger/gdb-stub.h>
 #endif
+#ifdef ENABLE_MCP_SERVER
+#include <mgba/internal/debugger/mcp-server.h>
+#endif
 #ifdef USE_EDITLINE
 #include <mgba/internal/debugger/cli-el-backend.h>
 #endif
@@ -43,6 +46,9 @@ static const struct option _options[] = {
 #endif
 #ifdef ENABLE_GDB_STUB
 	{ "gdb",       no_argument, 0, 'g' },
+#endif
+#ifdef ENABLE_MCP_SERVER
+	{ "mcp",       optional_argument, 0, 'M' },
 #endif
 	{ "help",      no_argument, 0, 'h' },
 	{ "log-level", required_argument, 0, 'l' },
@@ -88,6 +94,9 @@ bool mArgumentsParse(struct mArguments* args, int argc, char* const* argv, struc
 #endif
 #ifdef ENABLE_GDB_STUB
 		"g"
+#endif
+#ifdef ENABLE_MCP_SERVER
+		"M::"
 #endif
 	;
 
@@ -156,6 +165,14 @@ bool mArgumentsParse(struct mArguments* args, int argc, char* const* argv, struc
 		case 'g':
 			args->debugAtStart = true;
 			args->debugGdb = true;
+			break;
+#endif
+#ifdef ENABLE_MCP_SERVER
+		case 'M':
+			args->mcpPort = optarg ? atoi(optarg) : MCP_SERVER_DEFAULT_PORT;
+			if (args->mcpPort <= 0 || args->mcpPort > 65535) {
+				return false;
+			}
 			break;
 #endif
 		case 'h':
@@ -255,6 +272,19 @@ bool mArgumentsApplyDebugger(const struct mArguments* args, struct mCore* core, 
 		if (module) {
 			mDebuggerAttachModule(debugger, module);
 			hasDebugger = true;
+		}
+	}
+#endif
+
+#ifdef ENABLE_MCP_SERVER
+	if (args->mcpPort) {
+		struct MCPServer* server = malloc(sizeof(*server));
+		MCPServerCreate(server);
+		if (MCPServerListen(server, args->mcpPort, NULL)) {
+			mDebuggerAttachModule(debugger, &server->d);
+			hasDebugger = true;
+		} else {
+			free(server);
 		}
 	}
 #endif
@@ -381,6 +411,9 @@ void usage(const char* arg0, const char* prologue, const char* epilogue, const s
 #endif
 #ifdef ENABLE_GDB_STUB
 	     "  -g, --gdb                  Start GDB session (default port 2345)\n"
+#endif
+#ifdef ENABLE_MCP_SERVER
+	     "  -M, --mcp[=PORT]           Start MCP server for AI agents (default port 2347)\n"
 #endif
 	     "  -l, --log-level N          Log level mask\n"
 	     "  -t, --savestate FILE       Load savestate when starting\n"

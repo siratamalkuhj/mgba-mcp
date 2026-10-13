@@ -19,6 +19,10 @@ if(ENABLE_GDB_STUB)
 	list(APPEND SOURCE_FILES gdb-stub.c)
 endif()
 
+if(ENABLE_MCP_SERVER)
+	list(APPEND SOURCE_FILES mcp-server.c)
+endif()
+
 set(TEST_FILES
 	test/lexer.c
 	test/parser.c)

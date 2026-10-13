@@ -28,6 +28,7 @@ struct mArguments {
 	bool debugAtStart;
 	bool debugCli;
 	bool debugGdb;
+	int mcpPort;
 	bool showHelp;
 	bool showVersion;
 };
