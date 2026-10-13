@@ -1,5 +1,7 @@
 # MCP server (mgba-mcp)
 
+日本語版: [MCP_JP.md](MCP_JP.md)
+
 This fork of mGBA adds a built-in [Model Context Protocol](https://modelcontextprotocol.io)
 server, so AI agents such as Claude Code can play, inspect and debug GBA games running in mGBA.
 
