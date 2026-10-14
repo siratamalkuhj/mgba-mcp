@@ -1284,10 +1284,18 @@ static cJSON* _rpcError(const cJSON* id, int code, const char* message) {
 	return response;
 }
 
-static cJSON* _rpcResult(const cJSON* id, cJSON* result, bool modern) {
+/* 2026-07-28: cacheable results (lists, discovery) MUST carry ttlMs and cacheScope. */
+#define MCP_STATIC_TTL_MS (5 * 60 * 1000)
+
+static cJSON* _rpcResultCached(const cJSON* id, cJSON* result, bool modern, bool cacheable) {
 	if (modern) {
 		/* Stateless revisions tag every result and identify the server in _meta. */
 		cJSON_AddStringToObject(result, "resultType", "complete");
+		if (cacheable) {
+			/* These only change with the binary. */
+			cJSON_AddNumberToObject(result, "ttlMs", MCP_STATIC_TTL_MS);
+			cJSON_AddStringToObject(result, "cacheScope", "public");
+		}
 		cJSON* meta = cJSON_AddObjectToObject(result, "_meta");
 		cJSON* info = cJSON_AddObjectToObject(meta, MCP_META_SERVER_INFO);
 		cJSON_AddStringToObject(info, "name", MCP_SERVER_NAME);
@@ -1298,6 +1306,10 @@ static cJSON* _rpcResult(const cJSON* id, cJSON* result, bool modern) {
 	cJSON_AddItemToObject(response, "id", cJSON_Duplicate(id, true));
 	cJSON_AddItemToObject(response, "result", result);
 	return response;
+}
+
+static cJSON* _rpcResult(const cJSON* id, cJSON* result, bool modern) {
+	return _rpcResultCached(id, result, modern, false);
 }
 
 static cJSON* _versionList(void) {
@@ -1384,7 +1396,7 @@ static cJSON* _handleRpc(struct MCPServer* server, const cJSON* request, const s
 		cJSON_AddItemToObject(result, "supportedVersions", _versionList());
 		cJSON_AddItemToObject(result, "capabilities", _capabilities());
 		cJSON_AddStringToObject(result, "instructions", _instructions);
-		return _rpcResult(id, result, true);
+		return _rpcResultCached(id, result, true, true);
 	}
 	if (strcmp(name, "ping") == 0 && !modern) {
 		return _rpcResult(id, cJSON_CreateObject(), false);
@@ -1405,7 +1417,7 @@ static cJSON* _handleRpc(struct MCPServer* server, const cJSON* request, const s
 			cJSON_AddItemToObject(tool, "inputSchema", schema);
 			cJSON_AddItemToArray(list, tool);
 		}
-		return _rpcResult(id, result, modern);
+		return _rpcResultCached(id, result, modern, true);
 	}
 	if (strcmp(name, "tools/call") == 0) {
 		const cJSON* toolName = cJSON_GetObjectItemCaseSensitive(params, "name");
@@ -1439,7 +1451,7 @@ static cJSON* _handleRpc(struct MCPServer* server, const cJSON* request, const s
 		cJSON* result = cJSON_CreateObject();
 		const char* key = strcmp(name, "prompts/list") == 0 ? "prompts" : (strcmp(name, "resources/list") == 0 ? "resources" : "resourceTemplates");
 		cJSON_AddArrayToObject(result, key);
-		return _rpcResult(id, result, modern);
+		return _rpcResultCached(id, result, modern, true);
 	}
 	if (modern) {
 		*httpStatus = 404;
@@ -1973,7 +1985,7 @@ bool MCPServerListen(struct MCPServer* server, int port, const struct Address* b
 		server->listenSocket = INVALID_SOCKET;
 		return false;
 	}
-	mLOG(MCP, INFO, "MCP server listening on http://127.0.0.1:%d/mcp", port);
+	mLOG(MCP, INFO, "Listening on http://127.0.0.1:%d/mcp", port);
 	return true;
 }
 
