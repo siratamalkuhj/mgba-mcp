@@ -5,6 +5,7 @@
 > `mgba-headless --mcp game.gba`, then connect with
 > `claude mcp add --transport http mgba http://127.0.0.1:2347/mcp`.
 >
+> - Windows download: [windows-latest release](https://github.com/siratamalkuhj/mgba-mcp/releases/tag/windows-latest)
 > - Usage and tool list: [doc/MCP.md](doc/MCP.md)
 > - 日本語の説明: [doc/MCP_JP.md](doc/MCP_JP.md)
 >

@@ -8,7 +8,20 @@ server, so AI agents such as Claude Code can play, inspect and debug GBA games r
 The server lives inside the emulator (`src/debugger/mcp-server.c`). It is an ordinary debugger
 module, so every request runs on the emulation thread and can safely touch emulator state.
 
+## Download (Windows)
+
+Automatic builds of the `mcp` branch are published at
+https://github.com/siratamalkuhj/mgba-mcp/releases/tag/windows-latest
+(`mgba-mcp-windows.zip`, containing both `mGBA.exe` and `mgba-headless.exe`).
+
 ## Starting it
+
+**GUI (Qt):** Tools > Settings > General > check **Enable MCP server** (port 2347 by default),
+then open a game. The server starts with every game until you turn it off. The game keeps running
+at normal speed; agents can `pause` it and step frame by frame. `mGBA --mcp[=PORT] game.gba` also
+works and overrides the setting.
+
+**Headless:**
 
 ```sh
 mgba-headless --mcp game.gba          # port 2347
@@ -20,8 +33,7 @@ The server only listens on `127.0.0.1` and rejects browser requests from non-loc
 In the headless frontend the game starts **paused**, which is what you want for deterministic,
 turn-based control. After `resume`, headless runs unthrottled (as fast as possible).
 
-Qt frontend integration (a settings toggle) is planned. For now the `--mcp` flag works in the
-headless frontend; the SDL frontend parses it too but has not been tested yet.
+The SDL frontend parses `--mcp` too but has not been tested yet.
 
 ## Connecting Claude Code
 

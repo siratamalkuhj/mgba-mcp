@@ -3,6 +3,8 @@
 > このフォークでは、Claude CodeなどのAIエージェントが [Model Context Protocol](https://modelcontextprotocol.io)
 > 経由でGBAのゲームを遊んだり、調べたり、デバッグしたりできます。詳しくは [doc/MCP_JP.md](doc/MCP_JP.md) を見てください。
 >
+> Windows版のダウンロード: [windows-latest](https://github.com/siratamalkuhj/mgba-mcp/releases/tag/windows-latest)
+>
 > 以下は本家mGBAのREADMEです。
 
 mGBA
