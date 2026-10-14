@@ -51,7 +51,16 @@ Windowsでは、`.gba` ファイルを `start-mcp.bat` にドラッグ&ドロッ
 
 ### 2. Claude Code から接続する
 
-別のターミナルで次を実行します。
+**おすすめ:プラグインを入れる。** 接続設定と、Claude にツールの使い方を教えるスキル(5種類)がまとめて入ります。Claude Code で次の2行を実行します。
+
+```
+/plugin marketplace add siratamalkuhj/mgba-mcp
+/plugin install mgba@mgba-mcp
+```
+
+(GitHubでこのリポジトリのデフォルトブランチを `mcp` にしておく必要があります。)プラグインを入れたら、以前に手動で登録した `mgba` は重複するので `claude mcp remove mgba -s local` で消してください。
+
+**プラグインなしで接続だけする場合:** 別のターミナルで次を実行します。
 
 ```sh
 claude mcp add --transport http mgba http://127.0.0.1:2347/mcp
@@ -75,32 +84,73 @@ claude mcp add --transport http mgba http://127.0.0.1:2347/mcp
 - 画面付き版でメニューから一時停止している間は、`step` と `run_frames` は使えません。メニューで再開してから、Claude に `pause` してもらってください。
 - 安全のため、サーバーは自分のPC(127.0.0.1)からの接続しか受け付けません。
 
-## ツール一覧
+## ツール一覧(68個)
 
+DuckStation版([duckstation-claude-plugin](https://github.com/sadnescity/duckstation-claude-plugin))でできることを、GBAのハードウェアに合わせて移植しています。CD-ROM、GTE、PGXP、MDEC、メモリーカード2枚の入れ替えなどPS1固有の機能はGBAに存在しないため対象外です。
+
+**ゲーム操作・状態**
 | ツール | 内容 |
 | --- | --- |
-| `get_status` | 実行中か一時停止中か、フレーム数、ゲーム名、現在の命令位置、押しているボタン、最後に止まった理由 |
+| `get_status` | 実行中か一時停止中か、フレーム数、ゲーム名、命令位置、押しているボタン、最後に止まった理由 |
 | `pause` / `resume` | 一時停止 / 再開 |
-| `step` | CPU命令を1つずつ実行 |
-| `run_frames` | 指定フレーム数だけ進める(ボタンを押しながら進めることも、最後に画面を撮ることも可) |
-| `press_buttons` | ボタンを指定フレーム押して離す |
-| `set_buttons` | 押しっぱなしにするボタンを指定する |
-| `screenshot` | 現在の画面をPNG画像で取得 |
-| `reset` | リセット |
-| `read_memory` / `write_memory` | メモリの読み書き |
-| `list_memory_blocks` | メモリマップ(どのアドレスに何があるか) |
-| `get_registers` / `set_register` | CPUレジスタの読み書き |
-| `disassemble` | 機械語を人が読めるアセンブリに変換して表示 |
-| `add_breakpoint` | 指定アドレスの命令を実行する直前で止める |
+| `run_frames` | 指定フレーム数だけ進める(ボタンを押しながら・最後に画面を撮ることも可) |
+| `press_buttons` / `set_buttons` | ボタンを押して離す / 押しっぱなしにするボタンを指定 |
+| `input_sequence` | 「下を10フレーム→待つ→A」のような連続入力を1回で実行 |
+| `get_controller_state` | エミュレーターが押しているボタンと、ゲームが認識しているボタン |
+| `screenshot` | 画面をPNGで取得(ファイル保存も可) |
+| `reset` / `shutdown` | リセット / ゲームを閉じる(確認付き) |
+| `set_speed` | 速度変更・早送り(画面付き版) |
+| `get_settings` / `set_setting` | 設定の読み書き(音量、ミュート、フレームスキップなど) |
+
+**デバッグ**
+| ツール | 内容 |
+| --- | --- |
+| `step` / `step_over` / `step_out` | 1命令ずつ実行 / 関数呼び出しを丸ごと実行 / 呼び出し元に戻るまで実行 |
+| `trace` | 実行した命令とレジスタを記録(ファイル出力も可) |
+| `backtrace` | 関数の呼び出し履歴 |
+| `get_registers` / `set_register` / `get_cpu_state` | レジスタの読み書き / CPUモードや割り込みなどの詳細 |
+| `disassemble` | 機械語をアセンブリで表示 |
+| `add_breakpoint` | 指定命令で止める(「r0 == 5 のときだけ」などの条件付きも可) |
 | `add_watchpoint` | 指定メモリの読み書き・変化で止める |
-| `remove_breakpoint` / `list_breakpoints` | ブレークポイント・ウォッチポイントの削除と一覧 |
-| `save_state` / `load_state` | セーブステート(スロット1〜9、またはファイル) |
-| `add_cheat` | チートを登録(GameShark / Action Replay / CodeBreaker / VBA のコード、またはアドレスと値を指定して値を固定) |
-| `list_cheats` | 登録済みチートの一覧(画面付き版のチート画面で入れたものも含む) |
-| `set_cheat_enabled` / `remove_cheat` | チートのオン・オフ切り替え / 削除 |
-| `memory_search_start` | 値の検索を開始(画面の数値で検索、または「不明」で全メモリを記録) |
-| `memory_search_refine` | 検索結果の絞り込み(同じ値・増えた・減った・変わった・変わらない・N変わった など) |
-| `memory_search_results` | 現在の検索候補と、その値の一覧 |
+| `list_breakpoints` / `set_breakpoint_enabled` / `remove_breakpoint` / `clear_breakpoints` | 一覧 / 一時無効化 / 削除 / 全削除 |
+
+**メモリ**
+| ツール | 内容 |
+| --- | --- |
+| `read_memory` / `write_memory` | 読み書き(大きなデータはファイルやbase64で) |
+| `list_memory_blocks` / `dump_memory` | メモリマップ / 領域ごとファイルに保存 |
+| `search_bytes` | バイト列の検索(文字列やポインタ探し、`??`でワイルドカード) |
+| `snapshot_memory` / `diff_memory` | 操作の前後でメモリのどこが変わったかを比較 |
+| `find_free_ram` | 使われていなさそうな空き領域を探す |
+| `memory_watch` | 気になるアドレスを登録して値の変化を見る |
+
+**画面・音・ハードウェア(GBA)**
+| ツール | 内容 |
+| --- | --- |
+| `get_video_state` | 画面モード、BG(背景)の設定、ウィンドウ、半透明などの状態 |
+| `dump_palette` / `dump_tiles` | パレット / タイルを画像で出力 |
+| `dump_background` | 背景レイヤー全体を画像で出力 |
+| `list_sprites` / `dump_sprite` | スプライトの一覧 / 1枚を画像で出力 |
+| `get_audio_state` | サウンドの各チャンネルの状態 |
+| `get_hardware_state` | DMA、タイマー、割り込み、キー入力、ウェイトの状態 |
+
+**セーブ・ROM**
+| ツール | 内容 |
+| --- | --- |
+| `save_state` / `load_state` / `undo_load_state` | セーブステートの保存 / 読み込み / 読み込み前に戻す |
+| `list_save_states` / `get_save_state_info` / `delete_save_state` | 一覧 / 日時とスクリーンショット / 削除 |
+| `get_rom_info` | ゲーム名、コード、CRC32、セーブの種類、カートリッジの追加機能、BIOS |
+| `export_save` / `import_save` | カートリッジのセーブデータ(.sav)の書き出し / 読み込み(元のセーブは自動でバックアップ) |
+| `list_roms` / `load_rom` | フォルダ内のROM一覧 / ROMの切り替え(画面なし版のみ) |
+
+**チート**
+| ツール | 内容 |
+| --- | --- |
+| `add_cheat` | チートを登録(GameShark / Action Replay / CodeBreaker / VBA のコード、またはアドレスと値で固定) |
+| `list_cheats` / `set_cheat_enabled` / `remove_cheat` | 一覧 / オン・オフ / 削除 |
+| `validate_cheat` / `apply_cheat_once` | コードの形式チェック / 一回だけ適用 |
+| `import_cheats` / `export_cheats` | .cheats ファイルの読み込み / 書き出し |
+| `memory_search_start` / `memory_search_refine` / `memory_search_results` | 値の検索(所持金やHPのアドレスを突き止める) |
 
 アドレスは数値でも `"0x02000000"` のような文字列でも指定できます。
 
@@ -135,7 +185,8 @@ Claude に「所持金のアドレスを探して固定して」と頼むと、�
 
 - 動作確認済み:画面なし版(`mgba-headless`)をWindowsの Claude Code から操作
 - 追加済み:画面付き版(Qt)の設定画面に「Enable MCP server」とポート番号
-- 予定:Claude Code用プラグイン(接続設定と使い方のスキルをまとめたもの)
+- 追加済み:Claude Code用プラグイン(`claude-plugin/`、接続設定とスキル5種類)
+- 追加済み:DuckStation版相当の機能(68ツール)
 
 ## ビルド方法
 

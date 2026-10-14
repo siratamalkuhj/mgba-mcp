@@ -5,6 +5,8 @@
 >
 > Windows版のダウンロード: [windows-latest](https://github.com/siratamalkuhj/mgba-mcp/releases/tag/windows-latest)
 >
+> Claude Code用プラグイン(68ツール+使い方のスキル): `/plugin marketplace add siratamalkuhj/mgba-mcp` → `/plugin install mgba@mgba-mcp`
+>
 > 以下は本家mGBAのREADMEです。
 
 mGBA

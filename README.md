@@ -6,6 +6,7 @@
 > `claude mcp add --transport http mgba http://127.0.0.1:2347/mcp`.
 >
 > - Windows download: [windows-latest release](https://github.com/siratamalkuhj/mgba-mcp/releases/tag/windows-latest)
+> - Claude Code plugin (68 tools + skills): `/plugin marketplace add siratamalkuhj/mgba-mcp` then `/plugin install mgba@mgba-mcp`
 > - Usage and tool list: [doc/MCP.md](doc/MCP.md)
 > - 日本語の説明: [doc/MCP_JP.md](doc/MCP_JP.md)
 >

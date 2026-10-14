@@ -37,6 +37,15 @@ The SDL frontend parses `--mcp` too but has not been tested yet.
 
 ## Connecting Claude Code
 
+Recommended: install the plugin (connection + five skills that teach Claude the tools):
+
+```
+/plugin marketplace add siratamalkuhj/mgba-mcp
+/plugin install mgba@mgba-mcp
+```
+
+(The marketplace is read from the repository's default branch, which must be `mcp`.) Or register the server only:
+
 ```sh
 claude mcp add --transport http mgba http://127.0.0.1:2347/mcp
 ```
@@ -44,35 +53,22 @@ claude mcp add --transport http mgba http://127.0.0.1:2347/mcp
 Transport: Streamable HTTP, `POST /mcp`, JSON responses. Protocol revisions 2024-11-05 through
 2025-11-25 (via `initialize`) and the stateless 2026-07-28 revision are accepted.
 
-## Tools
+## Tools (68)
 
-| Tool | What it does |
+The feature set of [duckstation-claude-plugin](https://github.com/sadnescity/duckstation-claude-plugin) mapped onto GBA hardware. PS1-only parts (CD-ROM, GTE, PGXP, MDEC, dual memory cards) have no GBA equivalent; RetroAchievements, shaders and hotkeys are frontend features outside the core and are not exposed.
+
+| Area | Tools |
 | --- | --- |
-| `get_status` | Running/paused, frame, game title/code, PC, CPU mode, held buttons, last stop reason |
-| `pause` / `resume` | Pause at the end of the current frame / resume free-running |
-| `step` | Execute N instructions (pauses first if running) |
-| `run_frames` | Advance N frames, optionally holding buttons; `screenshot=true` returns the last frame |
-| `press_buttons` | Press buttons for N frames then release (advances frames when paused) |
-| `set_buttons` | Set exactly which buttons are held until changed |
-| `screenshot` | Current screen as PNG |
-| `reset` | Reset the console |
-| `read_memory` | Hex dump or u8/u16/u32 values, side-effect free |
-| `write_memory` | Write hex bytes or a 1/2/4-byte value |
-| `list_memory_blocks` | Memory map |
-| `get_registers` / `set_register` | CPU registers (plus mode and NZCV flags on GBA) |
-| `disassemble` | ARM/Thumb disassembly around the PC or an address |
-| `add_breakpoint` | Stop before executing an address |
-| `add_watchpoint` | Stop on read/write/change of a memory range |
-| `remove_breakpoint` / `list_breakpoints` | Manage breakpoints and watchpoints by id |
-| `save_state` / `load_state` | Savestates by slot (1-9) or file path |
-| `add_cheat` | Add a cheat: GameShark / Action Replay / CodeBreaker / VBA codes, or an address + value to freeze |
-| `list_cheats` | List cheats, including ones added in the GUI |
-| `set_cheat_enabled` / `remove_cheat` | Toggle or delete a cheat by index |
-| `memory_search_start` | Start a value ("cheat") search: by known value, or `unknown` to snapshot RAM |
-| `memory_search_refine` | Narrow it: equal / greater / less / changed / unchanged / increased / decreased / changed_by |
-| `memory_search_results` | Current candidates with their current values |
+| Play & status | `get_status`, `pause`, `resume`, `run_frames`, `press_buttons`, `set_buttons`, `input_sequence`, `get_controller_state`, `screenshot`, `reset`, `shutdown`, `set_speed`, `get_settings`, `set_setting` |
+| Debugging | `step`, `step_over`, `step_out`, `trace`, `backtrace`, `get_registers`, `set_register`, `get_cpu_state`, `disassemble`, `add_breakpoint` (with conditions), `add_watchpoint`, `list_breakpoints`, `set_breakpoint_enabled`, `remove_breakpoint`, `clear_breakpoints` |
+| Memory | `read_memory`, `write_memory` (inline, base64 or file), `list_memory_blocks`, `dump_memory`, `search_bytes`, `snapshot_memory`, `diff_memory`, `find_free_ram`, `memory_watch` |
+| Video / audio / hardware | `get_video_state`, `dump_palette`, `dump_tiles`, `dump_background`, `list_sprites`, `dump_sprite`, `get_audio_state`, `get_hardware_state` |
+| Saves & ROM | `save_state`, `load_state`, `undo_load_state`, `list_save_states`, `get_save_state_info`, `delete_save_state`, `get_rom_info`, `export_save`, `import_save`, `list_roms`, `load_rom` |
+| Cheats | `add_cheat`, `list_cheats`, `set_cheat_enabled`, `remove_cheat`, `validate_cheat`, `apply_cheat_once`, `import_cheats`, `export_cheats`, `memory_search_start`, `memory_search_refine`, `memory_search_results` |
 
-Addresses can be JSON numbers or strings such as `"0x02000000"`.
+Every tool's description and input schema is available through `tools/list`; the plugin's skills explain how to combine them.
+
+Addresses can be JSON numbers or strings such as `"0x02000000"`. Breakpoint conditions use mGBA's expression syntax with spaces between tokens (`r0 == 5`, `*0x03001000 > 3`; `*` reads a byte; decimal unless `0x`).
 
 Cheats use mGBA's own cheat engine, so they are applied every frame and, in the GUI, saved per game
 and shown in Tools > Cheats (reopen that window to see changes made over MCP). Value searches cover

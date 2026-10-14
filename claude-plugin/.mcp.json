@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mgba": {
+      "type": "http",
+      "url": "http://127.0.0.1:2347/mcp"
+    }
+  }
+}

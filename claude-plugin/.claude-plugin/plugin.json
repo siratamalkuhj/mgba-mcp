@@ -1,0 +1,8 @@
+{
+  "name": "mgba",
+  "description": "mGBA (Game Boy Advance) emulator MCP integration for Claude Code: play games, inspect and edit memory, breakpoints and watchpoints, stepping and tracing, GBA video/sprite/tile/palette dumps, audio and hardware state, cheats and value search, savestates and save data. 68 MCP tools for GBA reverse engineering, ROM hacking and testing.",
+  "version": "1.0.0",
+  "author": { "name": "siratamalkuhj" },
+  "homepage": "https://github.com/siratamalkuhj/mgba-mcp",
+  "license": "MPL-2.0"
+}

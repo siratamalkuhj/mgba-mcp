@@ -1,0 +1,19 @@
+{
+  "name": "mgba-mcp",
+  "owner": {
+    "name": "siratamalkuhj"
+  },
+  "metadata": {
+    "description": "Claude Code plugin for mgba-mcp, the mGBA fork with a built-in MCP server"
+  },
+  "plugins": [
+    {
+      "name": "mgba",
+      "source": "./claude-plugin",
+      "description": "mGBA (Game Boy Advance) emulator MCP integration: play, debug, inspect video/audio/hardware, cheats and value search, savestates. 68 tools for GBA reverse engineering, ROM hacking and testing.",
+      "version": "1.0.0",
+      "license": "MPL-2.0",
+      "keywords": ["gba", "game-boy-advance", "mgba", "emulator", "debugging", "reverse-engineering", "romhacking", "cheats"]
+    }
+  ]
+}
