@@ -23,6 +23,12 @@
 #endif
 
 #include <mgba/core/serialize.h>
+#ifdef ENABLE_MCP_SERVER
+#include <mgba/internal/debugger/mcp-server.h>
+#define MCP_SERVER_DEFAULT_PORT_VALUE MCP_SERVER_DEFAULT_PORT
+#else
+#define MCP_SERVER_DEFAULT_PORT_VALUE 2347
+#endif
 #include <mgba/core/version.h>
 #include <mgba/internal/gba/gba.h>
 
@@ -39,6 +45,17 @@ SettingsView::SettingsView(ConfigController* controller, InputController* inputC
 	, m_logModel(logController)
 {
 	m_ui.setupUi(this);
+
+#ifndef ENABLE_MCP_SERVER
+	m_ui.mcpLine->hide();
+	m_ui.mcpLabel->hide();
+	m_ui.mcpServer->hide();
+	m_ui.mcpPortLabel->hide();
+	m_ui.mcpPort->hide();
+#else
+	m_ui.mcpPort->setEnabled(m_ui.mcpServer->isChecked());
+	connect(m_ui.mcpServer, &QAbstractButton::toggled, m_ui.mcpPort, &QWidget::setEnabled);
+#endif
 
 	m_pageIndex[Page::AV] = 0;
 	m_pageIndex[Page::GAMEPLAY] = 1;
@@ -538,6 +555,8 @@ void SettingsView::updateConfig() {
 	saveSetting("logToStdout", m_ui.logToStdout);
 	saveSetting("logFile", m_ui.logFile);
 	saveSetting("useDiscordPresence", m_ui.useDiscordPresence);
+	saveSetting("mcpPort", m_ui.mcpPort);
+	saveSetting("mcpServer", m_ui.mcpServer);
 	saveSetting("dynamicTitle", m_ui.dynamicTitle);
 	saveSetting("videoScale", m_ui.videoScale);
 	saveSetting("gba.forceGbp", m_ui.forceGbp);
@@ -761,6 +780,8 @@ void SettingsView::reloadConfig() {
 	loadSetting("logToStdout", m_ui.logToStdout);
 	loadSetting("logFile", m_ui.logFile);
 	loadSetting("useDiscordPresence", m_ui.useDiscordPresence);
+	loadSetting("mcpServer", m_ui.mcpServer, false);
+	loadSetting("mcpPort", m_ui.mcpPort, MCP_SERVER_DEFAULT_PORT_VALUE);
 	loadSetting("dynamicTitle", m_ui.dynamicTitle, true);
 	loadSetting("gba.forceGbp", m_ui.forceGbp);
 	loadSetting("vbaBugCompat", m_ui.vbaBugCompat, true);

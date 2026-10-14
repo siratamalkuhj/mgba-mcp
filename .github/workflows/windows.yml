@@ -1,0 +1,150 @@
+name: Windows build
+
+# Builds the Qt (GUI) and headless versions of mgba-mcp for Windows with MSYS2,
+# bundles the DLLs they need, and publishes the result as the "windows-latest"
+# pre-release. If the build fails, the logs are published there instead so the
+# failure can be inspected without access to the Actions page.
+
+on:
+  push:
+    branches: [mcp]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            zip
+          pacboy: >-
+            cmake:p
+            ninja:p
+            gcc:p
+            pkgconf:p
+            qt6-base:p
+            qt6-multimedia:p
+            qt6-tools:p
+            qt6-translations:p
+            SDL2:p
+            libepoxy:p
+            libpng:p
+            zlib:p
+            sqlite3:p
+            libzip:p
+            lua:p
+            ntldd:p
+
+      - name: Configure
+        shell: msys2 {0}
+        run: |
+          set -o pipefail
+          mkdir -p logs
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DFORCE_QT_VERSION=6 \
+            -DBUILD_QT=ON \
+            -DBUILD_SDL=OFF \
+            -DBUILD_HEADLESS=ON \
+            -DUSE_FFMPEG=OFF \
+            -DUSE_DISCORD_RPC=OFF \
+            -DENABLE_MCP_SERVER=ON 2>&1 | tee logs/configure.log
+
+      - name: Build
+        shell: msys2 {0}
+        run: |
+          set -o pipefail
+          cmake --build build --parallel 2>&1 | tee logs/build.log
+
+      - name: Package
+        shell: msys2 {0}
+        run: |
+          set -o pipefail
+          dist=dist/mgba-mcp-windows
+          mkdir -p "$dist"
+          for exe in mGBA.exe mgba-headless.exe; do
+            found=$(find build -maxdepth 4 -iname "$exe" | head -1)
+            if [ -z "$found" ]; then echo "missing $exe"; exit 1; fi
+            cp "$found" "$dist/"
+          done
+          # Keep settings next to the exe instead of in %APPDATA%.
+          touch "$dist/portable.ini"
+          cp doc/MCP_JP.md doc/MCP.md "$dist/"
+
+          # Qt DLLs and plugins (platform, styles, image formats, multimedia).
+          wdq=$(command -v windeployqt6 || command -v windeployqt-qt6 || ls /ucrt64/share/qt6/bin/windeployqt.exe 2>/dev/null || true)
+          if [ -z "$wdq" ]; then echo "windeployqt not found"; exit 1; fi
+          "$wdq" --release --no-compiler-runtime --no-system-d3d-compiler --no-opengl-sw "$dist/mGBA.exe" 2>&1 | tee logs/windeployqt.log
+
+          # Every other DLL from MSYS2 that the exes and plugins need, repeated
+          # until nothing new turns up.
+          for pass in 1 2 3; do
+            find "$dist" -iname '*.exe' -o -iname '*.dll' | while read -r f; do
+              ntldd -R "$f" 2>/dev/null | grep -io '[a-z]:[^ ]*ucrt64[^ ]*\.dll' || true
+            done | sort -u | while read -r dll; do
+              unix=$(cygpath -u "$dll")
+              [ -f "$dist/$(basename "$unix")" ] || cp "$unix" "$dist/"
+            done
+          done
+
+          cat > "$dist/start-mcp.bat" <<'EOF'
+          @echo off
+          rem Drag and drop a .gba file onto this file to start mgba-headless with the MCP server.
+          if "%~1"=="" (
+            echo Usage: drag a .gba file onto start-mcp.bat
+            pause
+            exit /b 1
+          )
+          echo MCP server: http://127.0.0.1:2347/mcp  (close this window to stop)
+          "%~dp0mgba-headless.exe" --mcp "%~1"
+          pause
+          EOF
+          sed -i 's/^          //; s/$/\r/' "$dist/start-mcp.bat"
+
+          (cd dist && zip -qr ../mgba-mcp-windows.zip mgba-mcp-windows)
+          ls -la "$dist" | tee logs/package.log
+
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mgba-mcp-windows
+          path: mgba-mcp-windows.zip
+
+      - name: Publish release
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          short=$(git rev-parse --short HEAD)
+          if [ -f mgba-mcp-windows.zip ]; then
+            title="Windows build (latest, ${short})"
+            notes="Automatic build of the mcp branch at ${short}. Download mgba-mcp-windows.zip, extract it, and run mGBA.exe. See MCP_JP.md inside for usage."
+            files="mgba-mcp-windows.zip"
+          else
+            title="Windows build FAILED (${short})"
+            notes="The build of ${short} failed. build-logs.zip contains the logs."
+            files=""
+          fi
+          if [ -d logs ]; then
+            (cd logs && 7z a -tzip ../build-logs.zip . > /dev/null)
+            files="$files build-logs.zip"
+          fi
+          gh release delete windows-latest --yes --cleanup-tag || true
+          gh release create windows-latest --prerelease --target "$GITHUB_SHA" \
+            --title "$title" --notes "$notes" $files

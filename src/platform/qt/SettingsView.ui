@@ -739,6 +739,50 @@
          </property>
         </widget>
        </item>
+       <item row="20" column="0" colspan="2">
+        <widget class="Line" name="mcpLine">
+         <property name="orientation">
+          <enum>Qt::Horizontal</enum>
+         </property>
+        </widget>
+       </item>
+       <item row="21" column="0">
+        <widget class="QLabel" name="mcpLabel">
+         <property name="text">
+          <string>AI agents (MCP):</string>
+         </property>
+        </widget>
+       </item>
+       <item row="21" column="1">
+        <widget class="QCheckBox" name="mcpServer">
+         <property name="toolTip">
+          <string>Lets AI agents such as Claude Code control and inspect the running game over the Model Context Protocol. Only connections from this computer are accepted.</string>
+         </property>
+         <property name="text">
+          <string>Enable MCP server</string>
+         </property>
+        </widget>
+       </item>
+       <item row="22" column="0">
+        <widget class="QLabel" name="mcpPortLabel">
+         <property name="text">
+          <string>MCP port:</string>
+         </property>
+        </widget>
+       </item>
+       <item row="22" column="1">
+        <widget class="QSpinBox" name="mcpPort">
+         <property name="minimum">
+          <number>1</number>
+         </property>
+         <property name="maximum">
+          <number>65535</number>
+         </property>
+         <property name="value">
+          <number>2347</number>
+         </property>
+        </widget>
+       </item>
       </layout>
      </widget>
      <widget class="QWidget" name="interface_2">

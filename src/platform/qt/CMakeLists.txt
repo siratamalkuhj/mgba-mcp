@@ -281,6 +281,10 @@ if(ENABLE_GDB_STUB)
 	list(APPEND SOURCE_FILES GDBController.cpp GDBWindow.cpp)
 endif()
 
+if(ENABLE_MCP_SERVER)
+	list(APPEND SOURCE_FILES MCPController.cpp)
+endif()
+
 if(USE_SQLITE3)
 	list(APPEND SOURCE_FILES
 		ArchiveInspector.cpp

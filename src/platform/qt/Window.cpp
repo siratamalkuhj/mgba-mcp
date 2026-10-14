@@ -39,6 +39,9 @@
 #include "FrameView.h"
 #include "GBAApp.h"
 #include "GDBController.h"
+#ifdef ENABLE_MCP_SERVER
+#include "MCPController.h"
+#endif
 #include "GDBWindow.h"
 #include "GIFView.h"
 #ifdef BUILD_SDL
@@ -238,6 +241,13 @@ void Window::argumentsPassed() {
 #ifdef ENABLE_DEBUGGERS
 	if (args->debugCli) {
 		consoleOpen();
+	}
+#endif
+
+#ifdef ENABLE_MCP_SERVER
+	if (args->mcpPort) {
+		m_mcpArgPort = args->mcpPort;
+		updateMCP();
 	}
 #endif
 
@@ -1991,6 +2001,17 @@ void Window::setupOptions() {
 		reloadConfig();
 	}, this);
 
+#ifdef ENABLE_MCP_SERVER
+	ConfigOption* mcpServer = m_config->addOption("mcpServer");
+	mcpServer->connect([this](const QVariant&) {
+		updateMCP();
+	}, this);
+	ConfigOption* mcpPort = m_config->addOption("mcpPort");
+	mcpPort->connect([this](const QVariant&) {
+		updateMCP();
+	}, this);
+#endif
+
 	ConfigOption* preload = m_config->addOption("preload");
 	preload->connect([this](const QVariant& value) {
 		m_manager->setPreload(value.toBool());
@@ -2294,6 +2315,10 @@ void Window::setController(CoreController* controller) {
 	}
 #endif
 
+#ifdef ENABLE_MCP_SERVER
+	updateMCP();
+#endif
+
 #ifdef ENABLE_DEBUGGERS
 	if (m_console) {
 		m_console->setController(m_controller);
@@ -2446,4 +2471,29 @@ void WindowBackground::paintEvent(QPaintEvent* event) {
 	painter.fillRect(QRect(QPoint(), size()), Qt::black);
 	QRect full(clampSize(QSize(m_aspectWidth, m_aspectHeight), size(), true, false));
 	painter.drawPixmap(full, logo);
+}
+
+void Window::updateMCP() {
+#ifdef ENABLE_MCP_SERVER
+	bool enabled = m_mcpArgPort || m_config->getOption("mcpServer", "0").toInt();
+	int port = m_mcpArgPort;
+	if (!port) {
+		port = m_config->getOption("mcpPort", QString::number(MCP_SERVER_DEFAULT_PORT)).toInt();
+	}
+	if (port <= 0 || port > 65535) {
+		port = MCP_SERVER_DEFAULT_PORT;
+	}
+	if (!enabled) {
+		if (m_mcpController) {
+			m_mcpController->stop();
+		}
+		return;
+	}
+	if (!m_mcpController) {
+		m_mcpController = new MCPController(this);
+	}
+	if (m_controller) {
+		m_mcpController->start(m_controller, port);
+	}
+#endif
 }

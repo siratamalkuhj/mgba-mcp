@@ -38,6 +38,7 @@ class Display;
 class DolphinConnector;
 class FrameView;
 class GDBController;
+class MCPController;
 class GIFView;
 class LibraryController;
 class LogView;
@@ -168,6 +169,8 @@ private slots:
 
 	void delayedCleanup();
 
+	void updateMCP();
+
 private:
 	static const int FPS_TIMER_INTERVAL = 2000;
 	static const int MUST_RESTART_TIMEOUT = 10000;
@@ -265,6 +268,11 @@ private:
 
 #ifdef ENABLE_GDB_STUB
 	GDBController* m_gdbController = nullptr;
+#endif
+
+#ifdef ENABLE_MCP_SERVER
+	MCPController* m_mcpController = nullptr;
+	int m_mcpArgPort = 0; // set by --mcp[=PORT]; overrides the settings
 #endif
 
 #ifdef USE_SQLITE3

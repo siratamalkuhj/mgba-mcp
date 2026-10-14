@@ -7,6 +7,7 @@
 
 #include <mgba/core/core.h>
 #include <mgba/core/serialize.h>
+#include <mgba/core/thread.h>
 #include <mgba/core/version.h>
 #include <mgba-util/string.h>
 #include <mgba-util/vfs.h>
@@ -1904,6 +1905,13 @@ static void _mcpPaused(struct mDebuggerModule* module, int32_t timeoutMs) {
 static void _mcpUpdate(struct mDebuggerModule* module) {
 	struct MCPServer* server = (struct MCPServer*) module;
 	_attachCallbacks(server);
+	/* The update hook also runs while another thread has interrupted the core thread to
+	 * use the core itself (e.g. the Qt UI). Only serve requests while it is truly paused.
+	 * We are on the core thread and it holds the state mutex here, so reading is safe. */
+	struct mCoreThread* thread = mCoreThreadGet();
+	if (thread && thread->impl && thread->impl->state != mTHREAD_PAUSED) {
+		return;
+	}
 	_poll(server, MCP_CONTEXT_IDLE, 0);
 }
 
