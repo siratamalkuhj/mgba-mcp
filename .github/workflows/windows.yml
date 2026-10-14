@@ -45,7 +45,6 @@ jobs:
             zlib:p
             sqlite3:p
             libzip:p
-            lua:p
             ntldd:p
 
       - name: Configure
@@ -57,17 +56,21 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DFORCE_QT_VERSION=6 \
             -DBUILD_QT=ON \
-            -DBUILD_SDL=OFF \
+            -DBUILD_SDL=ON \
             -DBUILD_HEADLESS=ON \
+            -DBUILD_STATIC=ON \
+            -DBUILD_SHARED=OFF \
             -DUSE_FFMPEG=OFF \
             -DUSE_DISCORD_RPC=OFF \
+            -DUSE_LUA=OFF \
             -DENABLE_MCP_SERVER=ON 2>&1 | tee logs/configure.log
 
       - name: Build
         shell: msys2 {0}
         run: |
           set -o pipefail
-          cmake --build build --parallel 2>&1 | tee logs/build.log
+          # -k 0: keep going after errors so one run reports all of them.
+          cmake --build build --parallel -- -k 0 2>&1 | tee logs/build.log
 
       - name: Package
         shell: msys2 {0}
