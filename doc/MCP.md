@@ -65,8 +65,19 @@ Transport: Streamable HTTP, `POST /mcp`, JSON responses. Protocol revisions 2024
 | `add_watchpoint` | Stop on read/write/change of a memory range |
 | `remove_breakpoint` / `list_breakpoints` | Manage breakpoints and watchpoints by id |
 | `save_state` / `load_state` | Savestates by slot (1-9) or file path |
+| `add_cheat` | Add a cheat: GameShark / Action Replay / CodeBreaker / VBA codes, or an address + value to freeze |
+| `list_cheats` | List cheats, including ones added in the GUI |
+| `set_cheat_enabled` / `remove_cheat` | Toggle or delete a cheat by index |
+| `memory_search_start` | Start a value ("cheat") search: by known value, or `unknown` to snapshot RAM |
+| `memory_search_refine` | Narrow it: equal / greater / less / changed / unchanged / increased / decreased / changed_by |
+| `memory_search_results` | Current candidates with their current values |
 
 Addresses can be JSON numbers or strings such as `"0x02000000"`.
+
+Cheats use mGBA's own cheat engine, so they are applied every frame and, in the GUI, saved per game
+and shown in Tools > Cheats (reopen that window to see changes made over MCP). Value searches cover
+work RAM by default (`region: "all"` includes every writable region). Note that mGBA's Game Boy VBA
+code parser misreads values, so Game Boy freezes are generated as GameShark codes instead.
 
 ## How requests are scheduled
 

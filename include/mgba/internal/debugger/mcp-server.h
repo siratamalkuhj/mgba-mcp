@@ -11,6 +11,7 @@
 CXX_GUARD_START
 
 #include <mgba/core/interface.h>
+#include <mgba/core/mem-search.h>
 #include <mgba/debugger/debugger.h>
 #include <mgba-util/socket.h>
 
@@ -69,6 +70,13 @@ struct MCPServer {
 	/* Buttons held by `press_buttons` while the game is running. */
 	uint32_t timedKeys;
 	int timedKeysFrames;
+
+	/* Value search ("cheat search") state, kept between memory_search_* calls. */
+	struct mCoreMemorySearchResults searchResults;
+	bool searchActive;
+	int searchWidth;
+	bool searchRamOnly;
+	unsigned searchSteps;
 };
 
 void MCPServerCreate(struct MCPServer*);

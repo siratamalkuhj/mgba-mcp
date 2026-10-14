@@ -5,7 +5,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include <mgba/internal/debugger/mcp-server.h>
 
+#include <mgba/core/cheats.h>
 #include <mgba/core/core.h>
+#include <mgba/core/mem-search.h>
 #include <mgba/core/serialize.h>
 #include <mgba/core/thread.h>
 #include <mgba/core/version.h>
@@ -15,6 +17,10 @@
 #ifdef M_CORE_GBA
 #include <mgba/internal/arm/arm.h>
 #include <mgba/internal/arm/decoder.h>
+#include <mgba/internal/gba/cheats.h>
+#endif
+#ifdef M_CORE_GB
+#include <mgba/internal/gb/cheats.h>
 #endif
 
 #include "third-party/cjson/cJSON.h"
@@ -32,6 +38,7 @@ mLOG_DEFINE_CATEGORY(MCP, "MCP server", "core.debugger.mcp");
 #define MCP_MAX_STEPS 1000000
 #define MCP_MAX_FRAMES 3600
 #define MCP_MAX_DISASM 256
+#define MCP_MAX_SEARCH_SHOW 200
 
 #define MCP_META_PROTOCOL_VERSION "io.modelcontextprotocol/protocolVersion"
 #define MCP_META_SERVER_INFO "io.modelcontextprotocol/serverInfo"
@@ -1177,6 +1184,542 @@ static void _toolLoadState(struct MCPServer* server, const cJSON* args, enum MCP
 	_resultPrintf(result, "Loaded state; now at frame %u.", core->frameCounter(core));
 }
 
+
+/* ---------------------------------------------------------------------------
+ * Cheats
+ * ------------------------------------------------------------------------- */
+
+static struct mCheatDevice* _cheatDevice(struct mCore* core, struct MCPToolResult* result) {
+	struct mCheatDevice* device = core->cheatDevice ? core->cheatDevice(core) : NULL;
+	if (!device) {
+		_resultError(result, "This core has no cheat support.");
+	}
+	return device;
+}
+
+static void _cheatAutosave(struct mCheatDevice* device) {
+#if defined(ENABLE_VFS) && defined(ENABLE_DIRECTORIES)
+	/* Persists cheats next to the save file when the frontend enabled it (as the GUI does). */
+	mCheatAutosave(device);
+#else
+	UNUSED(device);
+#endif
+}
+
+static bool _cheatType(struct mCore* core, const char* name, int* type, struct MCPToolResult* result) {
+	*type = 0; /* autodetect, on every platform */
+	if (!name || strcmp(name, "auto") == 0) {
+		return true;
+	}
+#ifdef M_CORE_GBA
+	if (core->platform(core) == mPLATFORM_GBA) {
+		if (strcmp(name, "gameshark") == 0) {
+			*type = GBA_CHEAT_GAMESHARK;
+		} else if (strcmp(name, "action_replay") == 0) {
+			*type = GBA_CHEAT_PRO_ACTION_REPLAY;
+		} else if (strcmp(name, "codebreaker") == 0) {
+			*type = GBA_CHEAT_CODEBREAKER;
+		} else if (strcmp(name, "vba") == 0) {
+			*type = GBA_CHEAT_VBA;
+		} else {
+			_resultError(result, "'type' for GBA must be auto, gameshark, action_replay, codebreaker or vba");
+			return false;
+		}
+		return true;
+	}
+#endif
+#ifdef M_CORE_GB
+	if (core->platform(core) == mPLATFORM_GB) {
+		if (strcmp(name, "gameshark") == 0) {
+			*type = GB_CHEAT_GAMESHARK;
+		} else if (strcmp(name, "game_genie") == 0) {
+			*type = GB_CHEAT_GAME_GENIE;
+		} else if (strcmp(name, "vba") == 0) {
+			*type = GB_CHEAT_VBA;
+		} else {
+			_resultError(result, "'type' for Game Boy must be auto, gameshark, game_genie or vba");
+			return false;
+		}
+		return true;
+	}
+#endif
+	_resultError(result, "Unknown cheat type '%s'", name);
+	return false;
+}
+
+/* Adds whitespace-separated code words to `set` the way the GUI does: words are joined
+ * until they form a valid line, so "XXXXXXXX YYYYYYYY" and one code per line both work. */
+static size_t _addCheatCode(struct mCheatSet* set, const char* code, int type, int* failures) {
+	size_t added = 0;
+	char buffer[256] = "";
+	char word[128];
+	const char* p = code;
+	*failures = 0;
+	while (*p) {
+		while (*p && isspace((unsigned char) *p)) {
+			++p;
+		}
+		if (!*p) {
+			break;
+		}
+		size_t length = 0;
+		while (p[length] && !isspace((unsigned char) p[length])) {
+			++length;
+		}
+		if (length >= sizeof(word)) {
+			length = sizeof(word) - 1;
+		}
+		memcpy(word, p, length);
+		word[length] = '\0';
+		p += length;
+		while (*p && !isspace((unsigned char) *p)) {
+			++p;
+		}
+
+		if (buffer[0]) {
+			char joined[sizeof(buffer) + sizeof(word) + 1];
+			snprintf(joined, sizeof(joined), "%s %s", buffer, word);
+			if (mCheatAddLine(set, joined, type)) {
+				buffer[0] = '\0';
+				++added;
+			} else if (mCheatAddLine(set, word, type)) {
+				buffer[0] = '\0';
+				++added;
+				++*failures;
+			} else {
+				strncpy(buffer, word, sizeof(buffer) - 1);
+				buffer[sizeof(buffer) - 1] = '\0';
+				++*failures;
+			}
+		} else if (mCheatAddLine(set, word, type)) {
+			++added;
+		} else {
+			strncpy(buffer, word, sizeof(buffer) - 1);
+			buffer[sizeof(buffer) - 1] = '\0';
+		}
+	}
+	if (buffer[0]) {
+		++*failures;
+	}
+	return added;
+}
+
+/* Builds code lines that keep `value` written at `address` every frame. */
+static bool _freezeCode(struct mCore* core, uint32_t address, uint32_t value, int width, char* out, size_t outSize, int* type, struct MCPToolResult* result) {
+#ifdef M_CORE_GBA
+	if (core->platform(core) == mPLATFORM_GBA) {
+		*type = GBA_CHEAT_VBA;
+		switch (width) {
+		case 1:
+			snprintf(out, outSize, "%08X:%02X", address, value & 0xFF);
+			return true;
+		case 2:
+			snprintf(out, outSize, "%08X:%04X", address, value & 0xFFFF);
+			return true;
+		case 4:
+			snprintf(out, outSize, "%08X:%08X", address, value);
+			return true;
+		}
+		_resultError(result, "'width' must be 1, 2 or 4");
+		return false;
+	}
+#endif
+#ifdef M_CORE_GB
+	if (core->platform(core) == mPLATFORM_GB) {
+		/* GameShark "01VVLLHH": write byte VV to address HHLL. One code per byte, little-endian. */
+		if (address > 0xFFFF || (width != 1 && width != 2 && width != 4)) {
+			_resultError(result, "Game Boy addresses are 16-bit and 'width' must be 1, 2 or 4");
+			return false;
+		}
+		*type = GB_CHEAT_GAMESHARK;
+		size_t pos = 0;
+		int i;
+		for (i = 0; i < width; ++i) {
+			uint32_t a = (address + i) & 0xFFFF;
+			pos += snprintf(&out[pos], outSize - pos, "%s01%02X%02X%02X", i ? "\n" : "", (value >> (8 * i)) & 0xFF, a & 0xFF, a >> 8);
+		}
+		return true;
+	}
+#endif
+	UNUSED(address);
+	UNUSED(value);
+	UNUSED(width);
+	UNUSED(out);
+	UNUSED(outSize);
+	UNUSED(type);
+	_resultError(result, "Freezing values is not supported on this platform");
+	return false;
+}
+
+static cJSON* _cheatListJson(struct mCheatDevice* device) {
+	cJSON* list = cJSON_CreateArray();
+	size_t i;
+	for (i = 0; i < mCheatSetsSize(&device->cheats); ++i) {
+		struct mCheatSet* set = *mCheatSetsGetPointer(&device->cheats, i);
+		cJSON* item = cJSON_CreateObject();
+		cJSON_AddNumberToObject(item, "index", (double) i);
+		cJSON_AddStringToObject(item, "name", set->name ? set->name : "");
+		cJSON_AddBoolToObject(item, "enabled", set->enabled);
+		cJSON* lines = cJSON_AddArrayToObject(item, "codes");
+		size_t l;
+		for (l = 0; l < StringListSize(&set->lines); ++l) {
+			cJSON_AddItemToArray(lines, cJSON_CreateString(*StringListGetPointer(&set->lines, l)));
+		}
+		cJSON_AddItemToArray(list, item);
+	}
+	return list;
+}
+
+static struct mCheatSet* _cheatAt(struct mCheatDevice* device, const cJSON* args, struct MCPToolResult* result) {
+	uint32_t index;
+	if (!_argU32(args, "index", &index, true, result)) {
+		return NULL;
+	}
+	if (index >= mCheatSetsSize(&device->cheats)) {
+		_resultError(result, "No cheat at index %u (there are %zu; see list_cheats)", index, mCheatSetsSize(&device->cheats));
+		return NULL;
+	}
+	return *mCheatSetsGetPointer(&device->cheats, index);
+}
+
+static void _toolAddCheat(struct MCPServer* server, const cJSON* args, enum MCPContext context, struct MCPToolResult* result) {
+	UNUSED(context);
+	struct mCore* core = _core(server);
+	struct mCheatDevice* device = _cheatDevice(core, result);
+	if (!device) {
+		return;
+	}
+	const char* code = _argString(args, "code");
+	const char* name = _argString(args, "name");
+	bool hasAddress = cJSON_GetObjectItemCaseSensitive(args, "address") != NULL;
+	if ((code != NULL) == hasAddress) {
+		_resultError(result, "Pass either 'code' (a cheat code) or 'address' + 'value' (to freeze a value), not both");
+		return;
+	}
+
+	char generated[128];
+	char defaultName[64];
+	int type;
+	if (code) {
+		if (!_cheatType(core, _argString(args, "type"), &type, result)) {
+			return;
+		}
+		snprintf(defaultName, sizeof(defaultName), "MCP cheat");
+	} else {
+		uint32_t address, value;
+		if (!_argU32(args, "address", &address, true, result) || !_argU32(args, "value", &value, true, result)) {
+			return;
+		}
+		int width = _argInt(args, "width", 1);
+		if (!_freezeCode(core, address, value, width, generated, sizeof(generated), &type, result)) {
+			return;
+		}
+		code = generated;
+		snprintf(defaultName, sizeof(defaultName), "MCP: 0x%X = %u", address, value);
+	}
+
+	struct mCheatSet* set = device->createSet(device, name ? name : defaultName);
+	int failures = 0;
+	size_t added = _addCheatCode(set, code, type, &failures);
+	if (!added) {
+		mCheatSetDeinit(set);
+		_resultError(result, "No valid cheat code found. Check the format, or pass 'type' (gameshark, action_replay, codebreaker, vba).");
+		return;
+	}
+	set->enabled = _argBool(args, "enabled", true);
+	mCheatAddSet(device, set);
+	if (set->refresh) {
+		set->refresh(set, device);
+	}
+	_cheatAutosave(device);
+
+	cJSON* json = cJSON_CreateObject();
+	cJSON_AddNumberToObject(json, "index", (double) (mCheatSetsSize(&device->cheats) - 1));
+	cJSON_AddStringToObject(json, "name", set->name ? set->name : "");
+	cJSON_AddNumberToObject(json, "linesAdded", (double) added);
+	if (failures) {
+		cJSON_AddNumberToObject(json, "linesRejected", failures);
+		cJSON_AddStringToObject(json, "warning", "Some words could not be parsed and were skipped; the cheat may not work as intended.");
+	}
+	cJSON_AddBoolToObject(json, "enabled", set->enabled);
+	cJSON_AddStringToObject(json, "note", "Cheats apply every frame while enabled. Some codes need the game to reach a certain point, or a reset, to take effect.");
+	_resultJson(result, json);
+}
+
+static void _toolListCheats(struct MCPServer* server, const cJSON* args, enum MCPContext context, struct MCPToolResult* result) {
+	UNUSED(args);
+	UNUSED(context);
+	struct mCheatDevice* device = _cheatDevice(_core(server), result);
+	if (!device) {
+		return;
+	}
+	cJSON* json = cJSON_CreateObject();
+	cJSON_AddItemToObject(json, "cheats", _cheatListJson(device));
+	_resultJson(result, json);
+}
+
+static void _toolSetCheatEnabled(struct MCPServer* server, const cJSON* args, enum MCPContext context, struct MCPToolResult* result) {
+	UNUSED(context);
+	struct mCheatDevice* device = _cheatDevice(_core(server), result);
+	if (!device) {
+		return;
+	}
+	struct mCheatSet* set = _cheatAt(device, args, result);
+	if (!set) {
+		return;
+	}
+	const cJSON* enabled = cJSON_GetObjectItemCaseSensitive(args, "enabled");
+	if (!cJSON_IsBool(enabled)) {
+		_resultError(result, "Missing required boolean argument 'enabled'");
+		return;
+	}
+	set->enabled = cJSON_IsTrue(enabled);
+	/* Applies the change now (including undoing ROM patches when disabling). */
+	mCheatRefresh(device, set);
+	_cheatAutosave(device);
+	_resultPrintf(result, "Cheat '%s' %s.", set->name ? set->name : "", set->enabled ? "enabled" : "disabled");
+}
+
+static void _toolRemoveCheat(struct MCPServer* server, const cJSON* args, enum MCPContext context, struct MCPToolResult* result) {
+	UNUSED(context);
+	struct mCheatDevice* device = _cheatDevice(_core(server), result);
+	if (!device) {
+		return;
+	}
+	struct mCheatSet* set = _cheatAt(device, args, result);
+	if (!set) {
+		return;
+	}
+	char name[128];
+	snprintf(name, sizeof(name), "%s", set->name ? set->name : "");
+	if (set->enabled) {
+		/* Undo ROM patches before the set goes away. */
+		set->enabled = false;
+		mCheatRefresh(device, set);
+	}
+	mCheatRemoveSet(device, set);
+	mCheatSetDeinit(set);
+	_cheatAutosave(device);
+	_resultPrintf(result, "Removed cheat '%s'. Remaining cheats were renumbered; see list_cheats.", name);
+}
+
+/* ---------------------------------------------------------------------------
+ * Value search ("cheat search")
+ * ------------------------------------------------------------------------- */
+
+static bool _isRamBlock(const struct mCoreMemoryBlock* block) {
+	return strcmp(block->internalName, "wram") == 0 || strcmp(block->internalName, "iwram") == 0 || strcmp(block->internalName, "hram") == 0;
+}
+
+static void _filterRam(struct mCore* core, struct mCoreMemorySearchResults* results) {
+	const struct mCoreMemoryBlock* blocks;
+	size_t nBlocks = core->listMemoryBlocks(core, &blocks);
+	size_t in, out = 0;
+	for (in = 0; in < mCoreMemorySearchResultsSize(results); ++in) {
+		const struct mCoreMemorySearchResult* res = mCoreMemorySearchResultsGetConstPointer(results, in);
+		size_t b;
+		for (b = 0; b < nBlocks; ++b) {
+			if (_isRamBlock(&blocks[b]) && res->address >= blocks[b].start && res->address < blocks[b].end) {
+				*mCoreMemorySearchResultsGetPointer(results, out++) = *res;
+				break;
+			}
+		}
+	}
+	mCoreMemorySearchResultsResize(results, (ssize_t) out - (ssize_t) in);
+}
+
+static int _compareResults(const void* a, const void* b) {
+	const struct mCoreMemorySearchResult* ra = a;
+	const struct mCoreMemorySearchResult* rb = b;
+	return ra->address < rb->address ? -1 : ra->address > rb->address;
+}
+
+static uint32_t _readWidth(struct mCore* core, uint32_t address, int segment, int width) {
+	switch (width) {
+	case 1:
+		return core->rawRead8(core, address, segment);
+	case 2:
+		return core->rawRead16(core, address, segment);
+	default:
+		return core->rawRead32(core, address, segment);
+	}
+}
+
+static void _searchSummary(struct MCPServer* server, int maxShow, struct MCPToolResult* result) {
+	struct mCore* core = _core(server);
+	struct mCoreMemorySearchResults* results = &server->searchResults;
+	size_t count = mCoreMemorySearchResultsSize(results);
+	if (maxShow < 0) {
+		maxShow = 0;
+	} else if (maxShow > MCP_MAX_SEARCH_SHOW) {
+		maxShow = MCP_MAX_SEARCH_SHOW;
+	}
+	if (count > 1) {
+		qsort(mCoreMemorySearchResultsGetPointer(results, 0), count, sizeof(struct mCoreMemorySearchResult), _compareResults);
+	}
+
+	cJSON* json = cJSON_CreateObject();
+	cJSON_AddNumberToObject(json, "candidates", (double) count);
+	cJSON_AddNumberToObject(json, "width", server->searchWidth);
+	cJSON_AddNumberToObject(json, "step", server->searchSteps);
+	cJSON* list = cJSON_AddArrayToObject(json, "results");
+	size_t i;
+	for (i = 0; i < count && (int) i < maxShow; ++i) {
+		const struct mCoreMemorySearchResult* res = mCoreMemorySearchResultsGetConstPointer(results, i);
+		cJSON* item = cJSON_CreateObject();
+		_addHex(item, "address", res->address);
+		cJSON_AddNumberToObject(item, "value", _readWidth(core, res->address, res->segment, server->searchWidth));
+		cJSON_AddItemToArray(list, item);
+	}
+	if (count > (size_t) maxShow) {
+		cJSON_AddNumberToObject(json, "notShown", (double) (count - maxShow));
+	}
+	if (count == 0) {
+		cJSON_AddStringToObject(json, "hint", "No candidates left. Start over with memory_search_start (try another width, or 'unknown' if the shown number is not stored as-is).");
+	} else if (count > 50) {
+		cJSON_AddStringToObject(json, "hint", "Change the value in the game (or let time pass), then narrow down with memory_search_refine.");
+	} else {
+		cJSON_AddStringToObject(json, "hint", "Few candidates left: try write_memory on one to confirm, then add_cheat with address + value to freeze it.");
+	}
+	_resultJson(result, json);
+}
+
+static void _toolSearchStart(struct MCPServer* server, const cJSON* args, enum MCPContext context, struct MCPToolResult* result) {
+	UNUSED(context);
+	struct mCore* core = _core(server);
+	const char* condition = _argString(args, "condition");
+	if (!condition) {
+		condition = cJSON_GetObjectItemCaseSensitive(args, "value") ? "equal" : "unknown";
+	}
+	int width = _argInt(args, "width", 1);
+	if (width != 1 && width != 2 && width != 4) {
+		_resultError(result, "'width' must be 1, 2 or 4 (bytes)");
+		return;
+	}
+	const char* region = _argString(args, "region");
+	bool ramOnly = !region || strcmp(region, "ram") == 0;
+	if (!ramOnly && strcmp(region, "all") != 0) {
+		_resultError(result, "'region' must be ram or all");
+		return;
+	}
+
+	struct mCoreMemorySearchParams params;
+	memset(&params, 0, sizeof(params));
+	params.memoryFlags = mCORE_MEMORY_WRITE;
+	params.type = mCORE_MEMORY_SEARCH_INT;
+	params.align = -1;
+	params.width = width;
+	if (strcmp(condition, "unknown") == 0) {
+		params.op = mCORE_MEMORY_SEARCH_ANY;
+	} else {
+		uint32_t value;
+		if (!_argU32(args, "value", &value, true, result)) {
+			return;
+		}
+		if ((width == 1 && value > 0xFF) || (width == 2 && value > 0xFFFF)) {
+			_resultError(result, "Value %u does not fit in %d byte(s); use a larger 'width'", value, width);
+			return;
+		}
+		params.valueInt = (int32_t) value;
+		if (strcmp(condition, "equal") == 0) {
+			params.op = mCORE_MEMORY_SEARCH_EQUAL;
+		} else if (strcmp(condition, "greater") == 0) {
+			params.op = mCORE_MEMORY_SEARCH_GREATER;
+		} else if (strcmp(condition, "less") == 0) {
+			params.op = mCORE_MEMORY_SEARCH_LESS;
+		} else {
+			_resultError(result, "'condition' for a new search must be equal, greater, less or unknown");
+			return;
+		}
+	}
+
+	mCoreMemorySearchResultsClear(&server->searchResults);
+	mCoreMemorySearch(core, &params, &server->searchResults, 0);
+	if (ramOnly) {
+		_filterRam(core, &server->searchResults);
+	}
+	server->searchActive = true;
+	server->searchWidth = width;
+	server->searchRamOnly = ramOnly;
+	server->searchSteps = 1;
+	_searchSummary(server, _argInt(args, "max_results", 20), result);
+}
+
+static void _toolSearchRefine(struct MCPServer* server, const cJSON* args, enum MCPContext context, struct MCPToolResult* result) {
+	UNUSED(context);
+	struct mCore* core = _core(server);
+	if (!server->searchActive) {
+		_resultError(result, "No search in progress; call memory_search_start first.");
+		return;
+	}
+	const char* condition = _argString(args, "condition");
+	if (!condition) {
+		_resultError(result, "Missing required argument 'condition'");
+		return;
+	}
+	struct mCoreMemorySearchParams params;
+	memset(&params, 0, sizeof(params));
+	params.memoryFlags = mCORE_MEMORY_WRITE;
+	params.type = mCORE_MEMORY_SEARCH_INT;
+	params.align = -1;
+	params.width = server->searchWidth;
+
+	bool needsValue = strcmp(condition, "equal") == 0 || strcmp(condition, "greater") == 0 ||
+	                  strcmp(condition, "less") == 0 || strcmp(condition, "changed_by") == 0;
+	if (needsValue) {
+		uint32_t value = 0;
+		const cJSON* item = cJSON_GetObjectItemCaseSensitive(args, "value");
+		if (cJSON_IsNumber(item) && item->valuedouble < 0) {
+			/* changed_by accepts negative deltas. */
+			params.valueInt = (int32_t) item->valuedouble;
+		} else if (_argU32(args, "value", &value, true, result)) {
+			params.valueInt = (int32_t) value;
+		} else {
+			return;
+		}
+	}
+	if (strcmp(condition, "equal") == 0) {
+		params.op = mCORE_MEMORY_SEARCH_EQUAL;
+	} else if (strcmp(condition, "greater") == 0) {
+		params.op = mCORE_MEMORY_SEARCH_GREATER;
+	} else if (strcmp(condition, "less") == 0) {
+		params.op = mCORE_MEMORY_SEARCH_LESS;
+	} else if (strcmp(condition, "changed") == 0) {
+		params.op = mCORE_MEMORY_SEARCH_DELTA_ANY;
+	} else if (strcmp(condition, "unchanged") == 0) {
+		params.op = mCORE_MEMORY_SEARCH_DELTA;
+		params.valueInt = 0;
+	} else if (strcmp(condition, "increased") == 0) {
+		params.op = mCORE_MEMORY_SEARCH_DELTA_POSITIVE;
+	} else if (strcmp(condition, "decreased") == 0) {
+		params.op = mCORE_MEMORY_SEARCH_DELTA_NEGATIVE;
+	} else if (strcmp(condition, "changed_by") == 0) {
+		params.op = mCORE_MEMORY_SEARCH_DELTA;
+	} else {
+		_resultError(result, "'condition' must be equal, greater, less, changed, unchanged, increased, decreased or changed_by");
+		return;
+	}
+	size_t before = mCoreMemorySearchResultsSize(&server->searchResults);
+	mCoreMemorySearchRepeat(core, &params, &server->searchResults);
+	++server->searchSteps;
+	mLOG(MCP, DEBUG, "Search refined from %zu to %zu", before, mCoreMemorySearchResultsSize(&server->searchResults));
+	_searchSummary(server, _argInt(args, "max_results", 20), result);
+}
+
+static void _toolSearchResults(struct MCPServer* server, const cJSON* args, enum MCPContext context, struct MCPToolResult* result) {
+	UNUSED(context);
+	if (!server->searchActive) {
+		_resultError(result, "No search in progress; call memory_search_start first.");
+		return;
+	}
+	int maxShow = _argInt(args, "max_results", 50);
+	if (maxShow < 1 || maxShow > MCP_MAX_SEARCH_SHOW) {
+		_resultError(result, "'max_results' must be between 1 and %d", MCP_MAX_SEARCH_SHOW);
+		return;
+	}
+	_searchSummary(server, maxShow, result);
+}
+
 #define BUTTONS_SCHEMA "{\"type\":\"array\",\"items\":{\"type\":\"string\",\"enum\":[\"A\",\"B\",\"Select\",\"Start\",\"Right\",\"Left\",\"Up\",\"Down\",\"R\",\"L\"]}}"
 #define ADDRESS_SCHEMA(DESC) "{\"type\":[\"integer\",\"string\"],\"description\":\"" DESC " Number or string such as \\\"0x02000000\\\".\"}"
 #define EMPTY_SCHEMA "{\"type\":\"object\",\"properties\":{}}"
@@ -1250,6 +1793,33 @@ static const struct MCPTool _tools[] = {
 	{ "list_breakpoints",
 	  "List breakpoints and watchpoints set through MCP.",
 	  EMPTY_SCHEMA, MCP_REQ_ANY, _toolListBreakpoints },
+	{ "add_cheat",
+	  "Add a cheat that mGBA applies every frame. Either pass 'code' (GameShark, Action Replay, CodeBreaker or VBA codes; several lines allowed; format is auto-detected) or 'address' + 'value' (+ 'width') to keep a value frozen, e.g. infinite money once its address is known. Cheats are saved with the game like ones entered in the GUI.",
+	  "{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\",\"description\":\"Cheat code(s), e.g. \\\"82025D3C 03E7\\\". Whitespace or newlines between codes.\"},\"type\":{\"type\":\"string\",\"enum\":[\"auto\",\"gameshark\",\"action_replay\",\"codebreaker\",\"vba\",\"game_genie\"],\"default\":\"auto\"},\"address\":" ADDRESS_SCHEMA("Address to freeze (instead of 'code').") ",\"value\":{\"type\":[\"integer\",\"string\"],\"description\":\"Value to keep at 'address'.\"},\"width\":{\"type\":\"integer\",\"enum\":[1,2,4],\"default\":1},\"name\":{\"type\":\"string\",\"description\":\"Label shown in list_cheats and the GUI cheats window.\"},\"enabled\":{\"type\":\"boolean\",\"default\":true}}}",
+	  MCP_REQ_ANY, _toolAddCheat },
+	{ "list_cheats",
+	  "List cheats (index, name, enabled, codes), including ones added in the GUI.",
+	  EMPTY_SCHEMA, MCP_REQ_ANY, _toolListCheats },
+	{ "set_cheat_enabled",
+	  "Turn a cheat on or off by its index from list_cheats.",
+	  "{\"type\":\"object\",\"properties\":{\"index\":{\"type\":\"integer\",\"minimum\":0},\"enabled\":{\"type\":\"boolean\"}},\"required\":[\"index\",\"enabled\"]}",
+	  MCP_REQ_ANY, _toolSetCheatEnabled },
+	{ "remove_cheat",
+	  "Delete a cheat by its index from list_cheats. Later cheats are renumbered.",
+	  "{\"type\":\"object\",\"properties\":{\"index\":{\"type\":\"integer\",\"minimum\":0}},\"required\":[\"index\"]}",
+	  MCP_REQ_ANY, _toolRemoveCheat },
+	{ "memory_search_start",
+	  "Start a value search to find where the game stores a number (money, HP, lives...). Search for the value shown on screen (condition=equal), or use condition=unknown to snapshot all memory when the number isn't shown directly. Then change the value in the game and call memory_search_refine until few candidates remain. Searches work RAM by default.",
+	  "{\"type\":\"object\",\"properties\":{\"condition\":{\"type\":\"string\",\"enum\":[\"equal\",\"greater\",\"less\",\"unknown\"],\"description\":\"Default: equal if 'value' is given, otherwise unknown.\"},\"value\":{\"type\":[\"integer\",\"string\"]},\"width\":{\"type\":\"integer\",\"enum\":[1,2,4],\"default\":1,\"description\":\"Bytes per value. Use 2 or 4 for numbers that can exceed 255.\"},\"region\":{\"type\":\"string\",\"enum\":[\"ram\",\"all\"],\"default\":\"ram\",\"description\":\"ram = work RAM only; all = every writable region (VRAM, I/O, save RAM...).\"},\"max_results\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":200,\"default\":20}}}",
+	  MCP_REQ_ANY, _toolSearchStart },
+	{ "memory_search_refine",
+	  "Narrow the current value search, comparing each candidate's current value against the given value or against its value at the previous step. Typical loop: change the value in the game (spend money, take damage), then refine with equal + the new value, or decreased / increased / changed / unchanged / changed_by (delta, may be negative).",
+	  "{\"type\":\"object\",\"properties\":{\"condition\":{\"type\":\"string\",\"enum\":[\"equal\",\"greater\",\"less\",\"changed\",\"unchanged\",\"increased\",\"decreased\",\"changed_by\"]},\"value\":{\"type\":[\"integer\",\"string\"],\"description\":\"Needed for equal, greater, less and changed_by.\"},\"max_results\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":200,\"default\":20}},\"required\":[\"condition\"]}",
+	  MCP_REQ_ANY, _toolSearchRefine },
+	{ "memory_search_results",
+	  "Show the current value search candidates with their current values.",
+	  "{\"type\":\"object\",\"properties\":{\"max_results\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":200,\"default\":50}}}",
+	  MCP_REQ_ANY, _toolSearchResults },
 	{ "save_state",
 	  "Save a savestate to a numbered slot (1-9) or to a file path.",
 	  "{\"type\":\"object\",\"properties\":{\"slot\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":9},\"path\":{\"type\":\"string\"}}}",
@@ -1335,7 +1905,9 @@ static cJSON* _capabilities(void) {
 static const char* _instructions =
 	"mGBA emulator control. Typical loop for playing: pause, then press_buttons / run_frames with screenshot=true "
 	"to advance deterministically and look at the result. For reverse engineering: read_memory, add_watchpoint on a "
-	"RAM value, resume, then get_status / get_registers / disassemble when it triggers.";
+	"RAM value, resume, then get_status / get_registers / disassemble when it triggers. For cheats: find a value's "
+	"address with memory_search_start / memory_search_refine, confirm it with write_memory, then add_cheat with "
+	"address + value to freeze it.";
 
 static enum MCPRequirement _requestRequirement(const cJSON* request) {
 	const cJSON* method = cJSON_GetObjectItemCaseSensitive(request, "method");
@@ -1893,6 +2465,9 @@ static void _mcpInit(struct mDebuggerModule* module) {
 static void _mcpDeinit(struct mDebuggerModule* module) {
 	struct MCPServer* server = (struct MCPServer*) module;
 	_detachCallbacks(server);
+	/* Search results belong to the game that is going away. */
+	mCoreMemorySearchResultsClear(&server->searchResults);
+	server->searchActive = false;
 	MCPServerShutdown(server);
 }
 
@@ -1958,6 +2533,7 @@ void MCPServerCreate(struct MCPServer* server) {
 	for (i = 0; i < MCP_SERVER_MAX_CONNECTIONS; ++i) {
 		server->connections[i].socket = INVALID_SOCKET;
 	}
+	mCoreMemorySearchResultsInit(&server->searchResults, 0);
 	server->d.type = DEBUGGER_CUSTOM;
 	server->d.init = _mcpInit;
 	server->d.deinit = _mcpDeinit;
