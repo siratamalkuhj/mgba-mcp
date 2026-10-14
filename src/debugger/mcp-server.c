@@ -1176,7 +1176,7 @@ static void _toolLoadState(struct MCPServer* server, const cJSON* args, enum MCP
 	_resultPrintf(result, "Loaded state; now at frame %u.", core->frameCounter(core));
 }
 
-#define BUTTONS_SCHEMA "{\"type\":\"array\",\"items\":{\"type\":\"string\",\"enum\":[\"A\",\"B\",\"Select\",\"Start\",\"Right\",\"Left\",\"Up\",\"Down\",\"R\",\"L\"]}"
+#define BUTTONS_SCHEMA "{\"type\":\"array\",\"items\":{\"type\":\"string\",\"enum\":[\"A\",\"B\",\"Select\",\"Start\",\"Right\",\"Left\",\"Up\",\"Down\",\"R\",\"L\"]}}"
 #define ADDRESS_SCHEMA(DESC) "{\"type\":[\"integer\",\"string\"],\"description\":\"" DESC " Number or string such as \\\"0x02000000\\\".\"}"
 #define EMPTY_SCHEMA "{\"type\":\"object\",\"properties\":{}}"
 
