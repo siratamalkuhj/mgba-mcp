@@ -49,6 +49,22 @@ struct MCPStopInfo {
 	uint32_t frame;
 };
 
+#define MCP_SNAPSHOT_REGIONS 4
+#define MCP_MAX_WATCHES 64
+#define MCP_MAX_SEQUENCE 256
+
+struct MCPMemoryWatch {
+	uint32_t address;
+	int width;
+	uint32_t lastValue;
+	char label[48];
+};
+
+struct MCPInputStep {
+	uint32_t keys;
+	int frames;
+};
+
 struct MCPServer {
 	struct mDebuggerModule d;
 
@@ -77,6 +93,27 @@ struct MCPServer {
 	int searchWidth;
 	bool searchRamOnly;
 	unsigned searchSteps;
+
+	/* State captured before the last load_state, for undo_load_state. */
+	void* undoState;
+	size_t undoStateSize;
+
+	/* RAM copy taken by snapshot_memory, compared by diff_memory. */
+	uint8_t* snapshot;
+	uint32_t snapshotStart[MCP_SNAPSHOT_REGIONS];
+	uint32_t snapshotSize[MCP_SNAPSHOT_REGIONS];
+	unsigned snapshotRegions;
+	uint32_t snapshotFrame;
+
+	/* Addresses tracked by memory_watch. */
+	struct MCPMemoryWatch watches[MCP_MAX_WATCHES];
+	unsigned nWatches;
+
+	/* Timed button sequence played by input_sequence while the game runs. */
+	struct MCPInputStep sequence[MCP_MAX_SEQUENCE];
+	unsigned sequenceLength;
+	unsigned sequenceIndex;
+	int sequenceFramesLeft;
 };
 
 void MCPServerCreate(struct MCPServer*);
